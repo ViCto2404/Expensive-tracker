@@ -2,42 +2,47 @@ import sqlite3
 import os
 from sqlite3 import Error
 from typing import List, Tuple, Optional
-from src.logger import logger
+from logger import logger
 
 class DatabaseManager:
 
-    def __init__(self, db_path: str='None'):
-        
+    def __init__(self, db_path: str = None):
+        # 1. CÁLCULO DE RUTA ABSOLUTA (Independiente de la terminal)
         if db_path is None:
-            file_path = os.path.abspath(__file__)
-            root = os.path.dirname(os.path.dirname(os.path.dirname(file_path)))
-            self.db_path = os.path.join(root, 'data', 'expenses.db')
+            # Obtenemos la ruta de este archivo: .../src/database/db_manager.py
+            current_file = os.path.abspath(__file__)
+            # Subimos 3 niveles para llegar a la raíz: Expensive-tracker/
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+            self.db_path = os.path.join(project_root, 'data', 'expenses.db')
         else:
-            self.db_path = db_path
+            self.db_path = os.path.abspath(db_path)
 
-        self._ensure_data_folder_exists()
+        # 2. VERIFICACIÓN DE CARPETA (Fuerza la creación si algo falla)
+        db_dir = os.path.dirname(self.db_path)
+        if not os.path.exists(db_dir):
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+                logger.info(f"Carpeta creada/verificada en: {db_dir}")
+            except Exception as e:
+                print(f"🚨 ERROR CRÍTICO: No se pudo crear la carpeta {db_dir}. {e}")
+
+        print(f"🔍 Intentando conectar a: {self.db_path}")
         self.create_table()
-    
-    def _ensure_data_folder_exists(self):
-        folder = os.path.dirname(self.db_path)
-        if not os.path.exists(folder):
-            os.makedirs(folder)
-            logger.info(f'Created data folder at {folder}')
 
-    
     def _get_connection(self):
         try:
-            conn = sqlite3.connect(self.db_path)
+            # check_same_thread=False es útil para aplicaciones GUI futuras
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
             return conn
         except Error as e:
+            # Imprimimos en consola también para que no se pierda en el log
+            print(f"❌ Error de SQLite: {e}")
             logger.error(f"Error connecting to database: {e}")
             return None
         
     def create_table(self) -> None:
-
         query = """
-
-        CREATE TABLE IF NO EXISTS expenses (
+        CREATE TABLE IF NOT EXISTS expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             amount REAL NOT NULL,
             category TEXT NOT NULL,
@@ -45,13 +50,21 @@ class DatabaseManager:
             description TEXT
         );
         """
-
-        try:
-            with self._get_connection() as conn:
-                conn.execute(query)
-                logger.info("Expenses database created or already exists.")
-        except Error as e:
-            logger.error(f"Error creating database: {e}")
+        conn = self._get_connection()
+        
+        # 3. PROTECCIÓN CONTRA EL ERROR NoneType
+        if conn is not None:
+            try:
+                with conn:
+                    conn.execute(query)
+                logger.info("Base de datos y tabla listas.")
+            except Error as e:
+                logger.error(f"Error al ejecutar query: {e}")
+            finally:
+                conn.close()
+        else:
+            # Esto te dirá exactamente por qué falló la conexión antes del crash
+            print("🚨 No se pudo iniciar la tabla: La conexión es None.")
 
     def add_expense(self, amount: float, category: str, date: str, description: Optional[str] = None) -> bool:
 
